@@ -1,6 +1,6 @@
 /*
  *
- * Copyright (C) 2018 GlobalLogic
+ * Copyright (C) 2019 GlobalLogic
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,14 +17,8 @@
 
 #define LOG_TAG "OemLockHAL"
 
-#include <string.h>
-#include <vector>
-#include <memory>
-#include <stdlib.h>
-
 #include <utils/Log.h>
 #include <cutils/properties.h>
-#include <openssl/sha.h>
 
 #include "OemLock.h"
 
@@ -38,49 +32,20 @@ namespace renesas {
  * HAL for managing the OEM lock state of the device.
  */
 OemLock::OemLock()
-    : m_is_init(false), m_BlockDeviceSize(0),
-      m_carrier_flag(1), m_device_flag(255) {
+    : m_is_init(connect()) {
     ALOGD("Create OemLock");
-#if 0
-    char value[PROPERTY_VALUE_MAX] = {0,};
-    if (property_get(PST_DATA_BLOCK_PROP.c_str(), value, "") > 0) {
-        m_DataBlockFile = value;
-        m_is_init = true;
-        ALOGD("Persistent partition is '%s'", m_DataBlockFile.c_str());
-    } else {
-        ALOGE("Error get property '%s'", PST_DATA_BLOCK_PROP.c_str());
-    }
-    if (m_is_init) {
-        m_BlockDeviceSize = getPartitionSize();
-        if (m_BlockDeviceSize != 0) {
-            m_is_init = true;
-            ALOGD("Persistent partition size is '%ld'", m_BlockDeviceSize);
-        } else {
-            m_is_init = false;
-            ALOGE("Error get partition size");
-        }
-    }
-    if (m_is_init) {
-        if (checkPartitionHash() == false) {
-            /* Set default value */
-            setOemUnlockEnabledByDevice(false);
-        }
-        /* Always enabled (TODO: need further improvement) */
-        setOemUnlockEnabledByCarrier(true);
-    }
-#else
-    m_is_init = true;
-#endif
 };
 
 OemLock::~OemLock() {
     ALOGD("Destroy OemLock");
+    if (m_is_init) {
+        disconnect();
+    }
 };
 
 /* Returns a vendor specific identifier of the HAL. */
 Return<void> OemLock::getName(getName_cb _hidl_cb) {
-    _hidl_cb(OemLockStatus::OK, {"Dummy OemLock HAL 1.0"});
-    /*_hidl_cb(OemLockStatus::OK, {"Renesas OemLock HAL 1.0"});*/
+    _hidl_cb(OemLockStatus::OK, {"Renesas OemLock HAL 1.0"});
     return Void();
 };
 
@@ -88,17 +53,21 @@ Return<void> OemLock::getName(getName_cb _hidl_cb) {
 Return<OemLockSecureStatus> OemLock::setOemUnlockAllowedByCarrier(
         bool allowed, const hidl_vec<uint8_t>& signature) {
     if (!m_is_init) {
+        ALOGE("OemLock TA is not connected");
         return OemLockSecureStatus::FAILED;
     }
+
+    std::lock_guard<std::mutex> lock(m_mutexCar);
+
     // NOTE: This implementation does not require a signature
     if (signature.size()) {
         ALOGW("Signature provided but is not being used");
     }
-    auto ret = setOemUnlockEnabledByCarrier(allowed);
-    if (ret) {
+
+    if (invoke(SET_OEM_UNLOCK_ALLOWED_BY_CARRIER, allowed)) {
         return OemLockSecureStatus::OK;
-    }
-    else {
+    } else {
+        ALOGE("Failed to set OEM lock allowed by the carrier");
         return OemLockSecureStatus::FAILED;
     }
 };
@@ -107,23 +76,37 @@ Return<OemLockSecureStatus> OemLock::setOemUnlockAllowedByCarrier(
 Return<void> OemLock::isOemUnlockAllowedByCarrier(
         isOemUnlockAllowedByCarrier_cb _hidl_cb) {
     if (!m_is_init) {
+        ALOGE("OemLock TA is not connected");
         _hidl_cb(OemLockStatus::FAILED, false);
         return Void();
     }
-    _hidl_cb(OemLockStatus::OK, getOemUnlockEnabledByCarrier());
+
+    std::lock_guard<std::mutex> lock(m_mutexCar);
+    bool allowed = false;
+
+    if (invoke(GET_OEM_UNLOCK_ALLOWED_BY_CARRIER, allowed)) {
+        _hidl_cb(OemLockStatus::OK, allowed);
+    } else {
+        ALOGE("Failed to get OEM lock allowed by the carrier");
+        _hidl_cb(OemLockStatus::FAILED, false);
+    }
+
     return Void();
 };
 
 /* Updates whether OEM unlock is allowed by the device. */
 Return<OemLockStatus> OemLock::setOemUnlockAllowedByDevice(bool allowed) {
     if (!m_is_init) {
+        ALOGE("OemLock TA is not connected");
         return OemLockStatus::FAILED;
     }
-    auto ret = setOemUnlockEnabledByDevice(allowed);
-    if (ret) {
+
+    std::lock_guard<std::mutex> lock(m_mutexDev);
+
+    if (invoke(SET_OEM_UNLOCK_ALLOWED_BY_DEVICE, allowed)) {
         return OemLockStatus::OK;
-    }
-    else {
+    } else {
+        ALOGE("Failed to set OEM lock allowed by the device");
         return OemLockStatus::FAILED;
     }
 };
@@ -132,169 +115,80 @@ Return<OemLockStatus> OemLock::setOemUnlockAllowedByDevice(bool allowed) {
 Return<void> OemLock::isOemUnlockAllowedByDevice(
         isOemUnlockAllowedByDevice_cb _hidl_cb) {
     if (!m_is_init) {
+        ALOGE("OemLock TA is not connected");
         _hidl_cb(OemLockStatus::FAILED, false);
         return Void();
     }
-    _hidl_cb(OemLockStatus::OK, getOemUnlockEnabledByDevice());
+
+    std::lock_guard<std::mutex> lock(m_mutexDev);
+    bool allowed = false;
+
+    if (invoke(GET_OEM_UNLOCK_ALLOWED_BY_DEVICE, allowed)) {
+        _hidl_cb(OemLockStatus::OK, allowed);
+    } else {
+        ALOGE("Failed to get OEM lock allowed by the device");
+        _hidl_cb(OemLockStatus::FAILED, false);
+    }
+
     return Void();
 };
 
-size_t OemLock::getPartitionSize(void)
+/*-----------------------------Private Implementation-------------------------*/
+
+bool OemLock::connect(void)
 {
-    auto fd = open(m_DataBlockFile.c_str(), O_RDONLY);
-    if (fd < 0) {
-        ALOGE("Error open '%s'", m_DataBlockFile.c_str());
-        return 0;
-    }
-    uint64_t size = 0;
-    auto ret = ioctl(fd, BLKGETSIZE64, &size);
-    if (ret < 0) {
-        ALOGE("Error ioctl '%s'", m_DataBlockFile.c_str());
-        size = 0;
-    }
-    close(fd);
-    return size;
-};
+    TEEC_Result res = TEEC_SUCCESS;
+    TEEC_UUID uuid = TA_OEMLOCK_UUID;
+    uint32_t err_origin = 0;
 
-bool OemLock::checkPartitionHash(void) {
-    std::ifstream inputStream(m_DataBlockFile,
-            std::ifstream::in | std::ifstream::binary);
-    if (!inputStream.is_open()) {
-        ALOGE("Error open persistent partition");
-        return false;
-    }
-    SHA256_CTX sha256_ctx;
-    if (SHA256_Init(&sha256_ctx) != 1) {
-        ALOGE("Error init SHA-256");
+    res = TEEC_InitializeContext(NULL, &m_ctx);
+    if (res != TEEC_SUCCESS) {
+        ALOGE("TEEC_InitializeContext failed with code 0x%x", res);
         return false;
     }
 
-    std::unique_ptr<uint8_t[]> storedHash(new uint8_t[DIGEST_SIZE_BYTES]);
-    inputStream.seekg(0, std::ios::beg);
-    inputStream.read(reinterpret_cast<char*>(storedHash.get()),
-            DIGEST_SIZE_BYTES);
+    res = TEEC_OpenSession(&m_ctx, &m_sess, &uuid, TEEC_LOGIN_PUBLIC,
+            NULL, NULL, &err_origin);
+    if (res != TEEC_SUCCESS) {
+        TEEC_FinalizeContext(&m_ctx);
+        ALOGE("TEEC_Opensession failed with code 0x%x, origin 0x%x",
+            res, err_origin);
 
-    std::unique_ptr<uint8_t[]> data(new uint8_t[m_BlockDeviceSize]);
-    memset(data.get(), 0, DIGEST_SIZE_BYTES);
-    /* Include 0 checksum in digest */
-    SHA256_Update(&sha256_ctx, data.get(), DIGEST_SIZE_BYTES);
-
-    inputStream.read(reinterpret_cast<char*>(data.get()),
-            m_BlockDeviceSize - DIGEST_SIZE_BYTES);
-    size_t bytes_read = inputStream.gcount();
-    if (bytes_read != m_BlockDeviceSize - DIGEST_SIZE_BYTES) {
-        ALOGE("Error read partition data");
-        return false;
-    } else {
-        /* All read successfully */
-        SHA256_Update(&sha256_ctx, data.get(),
-                m_BlockDeviceSize - DIGEST_SIZE_BYTES);
-    }
-
-    std::unique_ptr<uint8_t[]> computedHash(new uint8_t[DIGEST_SIZE_BYTES]);
-    SHA256_Final(computedHash.get(), &sha256_ctx);
-
-    if (memcmp(storedHash.get(), computedHash.get(), DIGEST_SIZE_BYTES)) {
-        ALOGW("Persistent partition hash mismatch!");
         return false;
     }
+
+    ALOGD("Connection with OemLock TA was established");
     return true;
-};
+}
 
-bool OemLock::getOemUnlockEnabledByCarrier(void) {
+void OemLock::disconnect()
+{
+    TEEC_CloseSession(&m_sess);
+    TEEC_FinalizeContext(&m_ctx);
+}
 
-    std::lock_guard<std::mutex> lock(m_mutexCar);
-#if 0
-    std::ifstream inputStream(m_DataBlockFile,
-            std::ifstream::in | std::ifstream::binary);
-    if (!inputStream.is_open()) {
-        ALOGE("Error open persistent partition");
+bool OemLock::invoke(uint32_t cmd, bool& allowed)
+{
+    TEEC_Operation op;
+    memset(&op, 0, sizeof(op));
+
+    op.paramTypes = TEEC_PARAM_TYPES
+            (TEEC_VALUE_INOUT, TEEC_NONE, TEEC_NONE, TEEC_NONE);
+
+    op.params[0].value.a = static_cast<uint32_t>(allowed);
+
+    uint32_t err_origin;
+    TEEC_Result res = TEEC_InvokeCommand(&m_sess, cmd, &op, &err_origin);
+    if (res != TEEC_SUCCESS) {
+        ALOGE("TEEC_InvokeCommand '%u' failed with "
+                "code 0x%x, origin 0x%x", cmd, res, err_origin);
         return false;
     }
 
-    char is_enable = 0;
-    inputStream.seekg(m_BlockDeviceSize - CARRIER_OFFSET, std::ios::beg);
-    inputStream.read(&is_enable, sizeof(is_enable));
+    allowed = (op.params[0].value.a != 0);
 
-    return (is_enable != 0);
-#else
-    return (m_carrier_flag != 0);
-#endif
-};
-
-bool OemLock::getOemUnlockEnabledByDevice(void) {
-
-    std::lock_guard<std::mutex> lock(m_mutexDev);
-#if 0
-    std::ifstream inputStream(m_DataBlockFile,
-            std::ifstream::in | std::ifstream::binary);
-    if (!inputStream.is_open()) {
-        ALOGE("Error open persistent partition");
-        return false;
-    }
-
-    char is_enable = 0;
-    inputStream.seekg(m_BlockDeviceSize - DEVICE_OFFSET, std::ios::beg);
-    inputStream.read(&is_enable, sizeof(is_enable));
-
-    return (is_enable != 0);
-#else
-    if (m_device_flag == 255) {
-        /*Read once:*/
-        char value[PROPERTY_VALUE_MAX] = {0,};
-        if (property_get(OEM_UNLOCK_PROP.c_str(), value, "") > 0) {
-            m_device_flag = atoi(value);
-            ALOGD("'%s' is '%s' [%d]", OEM_UNLOCK_PROP.c_str(), value, m_device_flag);
-        } else {
-            m_device_flag = 0;
-            ALOGE("Error get property '%s'", OEM_UNLOCK_PROP.c_str());
-        }
-    }
-    return (m_device_flag != 0);
-#endif
-};
-
-bool OemLock::setOemUnlockEnabledByCarrier(bool enabled) {
-
-    std::lock_guard<std::mutex> lock(m_mutexCar);
-#if 0
-    std::ofstream outputStream(m_DataBlockFile,
-            std::ifstream::out | std::ifstream::binary);
-    if (!outputStream.is_open()) {
-        ALOGE("Error open persistent partition");
-        return false;
-    }
-
-    char lock_byte = enabled ? 1 : 0;
-    outputStream.seekp(m_BlockDeviceSize - CARRIER_OFFSET, std::ios::beg);
-    outputStream.write(&lock_byte,sizeof(lock_byte));
-    outputStream.flush();
-#else
-    m_carrier_flag = enabled ? 1 : 0;
-#endif
     return true;
-};
-
-bool OemLock::setOemUnlockEnabledByDevice(bool enabled) {
-
-    std::lock_guard<std::mutex> lock(m_mutexDev);
-#if 0
-    std::ofstream outputStream(m_DataBlockFile,
-            std::ifstream::out | std::ifstream::binary);
-    if (!outputStream.is_open()) {
-        ALOGE("Error open persistent partition");
-        return false;
-    }
-
-    char lock_byte = enabled ? 1 : 0;
-    outputStream.seekp(m_BlockDeviceSize - DEVICE_OFFSET, std::ios::beg);
-    outputStream.write(&lock_byte, sizeof(lock_byte));
-    outputStream.flush();
-#else
-    m_device_flag = enabled ? 1 : 0;
-#endif
-    return true;
-};
+}
 
 }  // namespace renesas
 }  // namespace V1_0

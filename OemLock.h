@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 GlobalLogic
+ * Copyright (C) 2019 GlobalLogic
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,17 +18,16 @@
 #define OEMLOCK_HAL_H_
 
 #include <string>
-#include <fstream>
 #include <mutex>
-#include <sys/ioctl.h>
-#include <sys/mount.h>
 #include <inttypes.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <string.h>
 
 #include <android/hardware/oemlock/1.0/IOemLock.h>
 #include <hidl/Status.h>
+
+extern "C" {
+    #include <tee_client_api.h>
+}
+#include "oemlock_ta.h"
 
 namespace android {
 namespace hardware {
@@ -69,31 +68,15 @@ public:
     OemLock& operator=(const OemLock& rhs) = delete;
 
 private:
-    size_t getPartitionSize(void);
-    bool checkPartitionHash(void);
-    bool setOemUnlockEnabledByCarrier(bool enabled);
-    bool getOemUnlockEnabledByCarrier(void);
-    bool setOemUnlockEnabledByDevice(bool enabled);
-    bool getOemUnlockEnabledByDevice(void);
+    bool connect(void);
+    void disconnect(void);
+    bool invoke(uint32_t cmd, bool& allowed);
 
     bool m_is_init; ///< initialization flag
-    std::string m_DataBlockFile; ///< persistent path
-    size_t m_BlockDeviceSize; ///< persistent size
     std::mutex m_mutexCar; ///< carrier mutex
     std::mutex m_mutexDev; ///< device mutex
-
-    const std::string PST_DATA_BLOCK_PROP = "ro.frp.pst";
-    const std::string OEM_UNLOCK_PROP = "sys.oem_unlock_allowed";
-    const uint32_t DIGEST_SIZE_BYTES = 32;
-#if 0
-    const uint32_t CARRIER_OFFSET = 2;
-    const uint32_t DEVICE_OFFSET = 1;
-#endif
-
-    /* Hack: as we don't have access to FRP partition now,
-     * use these bytes instead. Remove this in real implementation */
-    uint8_t m_carrier_flag;
-    uint8_t m_device_flag;
+    TEEC_Context m_ctx; ///< TEE Context
+    TEEC_Session m_sess; ///< TEE Session
 };
 
 } // namespace renesas

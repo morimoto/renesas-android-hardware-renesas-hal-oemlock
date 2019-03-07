@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018 GlobalLogic
+# Copyright (C) 2019 GlobalLogic
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,13 +33,16 @@ LOCAL_CFLAGS = \
 	-Werror \
 	-DANDROID_BUILD
 
-LOCAL_C_INCLUDES := external/scrypt/lib/crypto
+LOCAL_C_INCLUDES := \
+	hardware/renesas/optee-client/public \
+	$(LOCAL_PATH)/ta
 
 LOCAL_SRC_FILES := \
 	service.cpp \
 	OemLock.cpp
 
 LOCAL_SHARED_LIBRARIES := \
+	libteec \
 	libbase \
 	liblog \
 	libcutils \
@@ -47,8 +50,19 @@ LOCAL_SHARED_LIBRARIES := \
 	libhidlbase \
 	libhidltransport \
 	libutils \
-	libcrypto \
 	android.hardware.oemlock@1.0
 
 include $(BUILD_EXECUTABLE)
+
+################################################################################
+# Build OemLock HAL TA                                                         #
+################################################################################
+
+# Please keep this variable consistent with TA_OEMLOCK_UUID defined
+# in oemlock_ta.h
+TA_UUID:=be1e65f4-40ca-11e9-b210d663bd873d93
+TA_SRC:=$(LOCAL_PATH)/ta
+
+include device/renesas/common/build/build_executable.mk
+
 endif # Include only for Renesas ones.
