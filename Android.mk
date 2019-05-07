@@ -34,7 +34,7 @@ LOCAL_CFLAGS = \
 	-DANDROID_BUILD
 
 LOCAL_C_INCLUDES := \
-	hardware/renesas/optee-client/public \
+	vendor/renesas/utils/optee-client/public \
 	$(LOCAL_PATH)/ta
 
 LOCAL_SRC_FILES := \
@@ -60,9 +60,9 @@ include $(BUILD_EXECUTABLE)
 
 # Please keep this variable consistent with TA_OEMLOCK_UUID defined
 # in oemlock_ta.h
-TA_UUID:=be1e65f4-40ca-11e9-b210d663bd873d93
-TA_SRC:=$(LOCAL_PATH)/ta
+TA_UUID    := be1e65f4-40ca-11e9-b210d663bd873d93
+TA_SRC     := $(LOCAL_PATH)/ta
 
-include device/renesas/common/build/build_executable.mk
+include device/renesas/common/build/build_tee_app.mk
 
 endif # Include only for Renesas ones.
