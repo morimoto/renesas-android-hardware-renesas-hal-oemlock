@@ -27,7 +27,7 @@ LOCAL_INIT_RC := android.hardware.oemlock@1.0-service.renesas.rc
 LOCAL_MODULE_RELATIVE_PATH := hw
 LOCAL_MODULE_TAGS := optional
 LOCAL_PROPRIETARY_MODULE := true
-
+LOCAL_REQUIRED_MODULES := be1e65f4-40ca-11e9-b210d663bd873d93.ta
 LOCAL_CFLAGS = \
 	-Wall \
 	-Werror \
@@ -60,9 +60,26 @@ include $(BUILD_EXECUTABLE)
 
 # Please keep this variable consistent with TA_OEMLOCK_UUID defined
 # in oemlock_ta.h
-TA_UUID    := be1e65f4-40ca-11e9-b210d663bd873d93
-TA_SRC     := $(LOCAL_PATH)/ta
+TA_OEMLOCK_UUID := be1e65f4-40ca-11e9-b210d663bd873d93
+TA_OEMLOCK_SRC := $(LOCAL_PATH)/ta
 
-include device/renesas/common/build/build_tee_app.mk
+TA_OEMLOCK_OUT := $(TA_OUT_INTERMEDIATES)/$(TA_OEMLOCK_UUID)_OBJ
+
+TA_OEMLOCK_TARGET := $(TA_OEMLOCK_UUID)_ta
+
+# OP-TEE Trusted OS is dependency for TA
+.PHONY: TA_OUT_$(TA_OEMLOCK_UUID)
+TA_OUT_$(TA_OEMLOCK_UUID): tee.bin
+	mkdir -p $(TA_OEMLOCK_OUT)
+	mkdir -p $(TARGET_OUT_VENDOR_SHARED_LIBRARIES)/optee_armtz
+
+.PHONY: $(TA_OEMLOCK_TARGET)
+$(TA_OEMLOCK_TARGET): TA_OUT_$(TA_OEMLOCK_UUID)
+	CROSS_COMPILE=$(OPTEE_CROSS_COMPILE) BINARY=$(TA_OEMLOCK_UUID) TA_DEV_KIT_DIR=$(TA_DEV_KIT_DIR) make -C $(TA_OEMLOCK_SRC) O=$(TA_OEMLOCK_OUT) clean
+	CROSS_COMPILE=$(OPTEE_CROSS_COMPILE) BINARY=$(TA_OEMLOCK_UUID) TA_DEV_KIT_DIR=$(TA_DEV_KIT_DIR) make -C $(TA_OEMLOCK_SRC) O=$(TA_OEMLOCK_OUT) all
+
+.PHONY: $(TA_OEMLOCK_UUID).ta
+$(TA_OEMLOCK_UUID).ta: $(TA_OEMLOCK_TARGET)
+	cp $(TA_OEMLOCK_OUT)/$@ $(TARGET_OUT_VENDOR_SHARED_LIBRARIES)/optee_armtz/$@
 
 endif # Include only for Renesas ones.
