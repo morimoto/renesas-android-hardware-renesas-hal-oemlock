@@ -27,7 +27,6 @@
 extern "C" {
     #include <tee_client_api.h>
 }
-#include "oemlock_ta.h"
 
 namespace android {
 namespace hardware {
@@ -43,6 +42,18 @@ using ::android::hardware::Void;
 using ::android::hardware::hidl_vec;
 using ::android::hardware::hidl_string;
 using ::android::sp;
+
+/* Pseudo TA UUID, implemented in Op-Tee core */
+#define TA_OEMLOCK_UUID \
+        { 0xac6a5a79, 0x688d, 0x4ca7, \
+            { 0x8c, 0xbb, 0x5c, 0x13, 0x33, 0x6a, 0xb4, 0x31 } }
+
+typedef enum {
+    GET_OEM_UNLOCK_ALLOWED_BY_CARRIER = 0,
+    SET_OEM_UNLOCK_ALLOWED_BY_CARRIER,
+    GET_OEM_UNLOCK_ALLOWED_BY_DEVICE,
+    SET_OEM_UNLOCK_ALLOWED_BY_DEVICE,
+} oemlock_command_t;
 
 class OemLock: public IOemLock {
 
